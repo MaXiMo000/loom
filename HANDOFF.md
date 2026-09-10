@@ -241,14 +241,145 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cd frontend && npm install && npm run dev -- --port 5190 --strictPort
 ```
 
-### Next (Phase 2, SPEC.md §10)
+## 2026-09-10 (same day): Phase 2 — sandboxed drift signal — done, adversarially verified
 
-The drift signal: a disposable, sandboxed venv-install step (`pip install
--r requirements.txt` from the real clone into a throwaway venv), then a
-real `lockstep check`. SPEC.md §7.2's own warning applies directly —
-running a stranger's `pip install` is a real code-execution surface, and
-this is explicitly gated behind getting the sandboxing/timeout/low-
-privilege-worker boundary right, not a corner to cut for a demo. The
-adversarial test SPEC.md §11 calls for (a lockfile engineered to try
-something hostile during install, confirming the sandbox holds) is part
-of calling Phase 2 done, not optional polish after.
+**What's running now**: `node.drift_status` is real. `app/signals/drift.py`
+runs two separate short-lived Docker containers per scan (`backend/
+drift-worker/Dockerfile` + `entrypoint.sh`) — `install` (network enabled,
+creates a fresh venv, installs the target repo's own pinned
+`requirements.txt` plus `lockstep` from a wheel baked into the image at
+build time, never from PyPI/git at scan time) and `check` (started with
+`--network=none` from the host side — `lockstep check` only reads local
+`importlib.metadata`, so there's no legitimate reason for this stage to
+ever make a network call, and the host removes the capability outright
+rather than trusting the process not to attempt one). Both containers are
+non-root (fixed uid `10001`), `--cap-drop=ALL`, `--security-opt
+no-new-privileges`, resource-capped (`--memory=768m --pids-limit=256
+--cpus=1`), `--rm`, and get nothing from the API process's own
+environment. Auto-detected: if Docker isn't reachable in a deployment
+(true of the current setup — Render's web/worker services don't expose a
+Docker daemon, see the decision below), drift honestly reads `unverified`
+with a stated reason, never guessed.
+
+### Decisions made (SPEC.md §7.2/§13 + implementation calls along the way)
+
+- **A real, discovered deployment blocker, decided explicitly rather than
+  worked around silently**: SPEC.md §7.2 offers two sandboxing shapes — "a
+  sandboxed subprocess with no network access after the initial install"
+  or "a short-lived container if the deploy target supports it." The
+  actual v1 deploy target (SPEC.md §12) is Render, whose standard
+  web/worker services do **not** expose a Docker daemon to the running
+  container — so the container approach this session built cannot run
+  as-is on the currently-targeted deployment. Decided to build it for
+  real anyway (auto-detected via `sandbox_available()`) rather than build
+  the weaker subprocess-only path first: it's the stronger, spec-sanctioned
+  isolation, it's fully real and adversarially verified today for local
+  dev/self-hosted/any Docker-capable deploy, and it degrades to an honest
+  `unverified` everywhere else — exactly SPEC.md §7.2's own explicitly
+  sanctioned fallback ("If this venv-install step is skipped for v1... every
+  node's drift status is honestly unverified"). Making the current Render
+  deployment actually support this (its own worker service with Docker
+  access, or rewriting the sandbox as a resource-limited subprocess with
+  `resource.setrlimit`, which SPEC.md §12 already anticipates: "Once Phase
+  2's sandboxing lands, the drift-signal worker should run as its own
+  Render service") is real, separately-scoped infra work, not a reason to
+  not build the real signal today.
+- **Two separate containers sharing a bind-mounted scratch dir, not one.**
+  Satisfies SPEC.md §7.2's stricter "no network access after the initial
+  install" literally, rather than settling for the "short-lived container"
+  fallback's weaker bar. `lockstep` itself is installed from a wheel baked
+  into the image at *build* time (not fetched from PyPI/git per scan) so
+  the `check` stage never needs network for its own tooling either.
+- **`node.drift_detail` added**, mirroring `vuln_detail` — not in SPEC.md
+  §7.6's original table, added because lockstep's own real `detail` string
+  ("'flask' matches its locked version 3.0.3") is exactly the kind of
+  "receipt, not a claim" the detail panel already promises for every other
+  signal; leaving drift as the one signal with no evidence text would have
+  been the actual inconsistency.
+- **Known infra noise filtered before it reaches a node**: a fresh venv
+  always carries `pip` (and would carry `setuptools`/`wheel` on some
+  Python versions) plus `lockstep-evidence` itself — all would otherwise
+  read as `extra` (installed, not declared) on *every single scan*,
+  which is a fact about loom's own sandbox, not a finding about the
+  scanned repo. Filtered by name before results are matched to nodes.
+- **Why comparing installed-vs-pinned isn't tautological even though loom
+  controls both sides** (worth stating since it's not obvious): loom
+  installs exactly what the lockfile pins into a fresh venv, so of course
+  it usually matches — the real value is in when it *doesn't*: a package
+  version yanked from PyPI since the lockfile was written fails to
+  install and reads `missing` (real, live-verified below), or a lockfile
+  that's silently incomplete (declares fewer packages than its own
+  transitive closure actually needs) would surface undeclared packages as
+  `extra`. Both are genuine facts about whether the repo's own lockfile
+  still holds up, not artifacts of loom's process.
+- **poetry.lock drift-checking not supported yet** — `pip install -r` needs
+  a real `requirements.txt`; a `poetry.lock` repo would need `poetry
+  export` run first, which is real, scoped, separate work. Reads
+  `unverified` with that reason stated, not silently skipped.
+
+### Verified
+
+- Backend: **36 passed** (was 28) — 8 new tests in
+  `tests/test_drift_signal.py`, all against the **real image**, not a
+  mock (a session-scoped `conftest.py` fixture builds it once, skips the
+  whole module if Docker isn't available — every CI run has it). Covers:
+  a real clean install reading `matched` for every package, infra-noise
+  filtering not eating a real package, a genuinely nonexistent pinned
+  package failing to install and reading honestly rather than crashing,
+  poetry/no-sandbox both reading their stated `unverified` reasons — **and
+  the real adversarial pass SPEC.md §11 requires**: a real local package
+  whose `setup.py` (executed unconditionally at pip-install time — real,
+  not simulated) tries three real attacks, run against the real sandbox:
+  1. writes to `/tmp/loom-adversarial-marker` — "succeeds" from the
+     hostile code's own point of view (it's writing into the container's
+     own ephemeral filesystem), and the test asserts that path **does
+     not exist on the host** — the actual isolation guarantee.
+  2. reads the process's own environment — asserts nothing SECRET/TOKEN/
+     DATABASE-shaped ever appears (`docker run` here never forwards this
+     process's own env).
+  3. a direct proof of the `check` stage's exact flag
+     (`--network=none`) actually returns "Network is unreachable" against
+     a real external host, independent of any package's own behavior.
+     A separate test confirms `--pids-limit` actually caps a real fork
+     bomb at the configured ceiling, not merely in theory.
+  `test_orchestrator.py`'s full end-to-end test now asserts real
+  `drift_status == "matched"` results (was a Phase-1-era `unverified`
+  placeholder) with a real `drift_detail` string — updated because it's
+  now genuinely wrong to assert otherwise, not loosened.
+- Frontend: `npx vitest run` (6 passed), `npx tsc -b` clean.
+- **Live-verified beyond the test suite**: built the real image
+  (`docker build`), ran the real two-container flow manually against the
+  real flask fixture closure (`install` succeeds silently, `check` — run
+  with `--network=none` — returns real JSON: 7 `matched`, plus `pip` and
+  `lockstep-evidence` correctly filtered as expected infra noise before
+  reaching any node). Ran the *adversarial* package manually the same
+  way before it became a committed test, confirming by hand what the
+  automated version now asserts. Then drove a real scan through the real
+  browser UI end to end: `flask`'s detail panel showed real `vuln_detail`
+  (a real carabiner-found CVE) **and** real `drift_detail`
+  (`'flask' matches its locked version 3.0.3`) together for the first
+  time, plus real GitHub metadata — three of the four signals now
+  genuinely computed on one node, exactly SPEC.md §1's whole premise.
+
+### Run it locally
+
+```
+cd backend
+docker compose up -d                                   # real local Postgres
+docker build -t loom-drift-worker:local drift-worker/   # the drift sandbox image
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/alembic upgrade head
+.venv/bin/uvicorn app.main:app --port 8123
+
+cd frontend && npm install && npm run dev -- --port 5190 --strictPort
+```
+
+### Next (Phase 3, SPEC.md §10)
+
+`/diff` endpoint's real node-level implementation + UI, the `HistoryRail`
+(deferred twice now — SPEC.md §8.4 pairs it with `/diff`, landing both
+together), deploy to Render (SPEC.md §12 — including deciding for real
+whether the drift-signal worker gets its own Docker-capable Render
+service, or whether Phase 2's sandbox gets reimplemented as a
+resource-limited subprocess for that specific deployment target, per the
+decision recorded above), a real Lighthouse-style pass on the frontend.

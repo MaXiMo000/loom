@@ -8,6 +8,7 @@ export interface ScanNode {
   vuln_severity: 'none' | 'low' | 'medium' | 'high' | 'critical' | 'unverified'
   vuln_detail: string | null
   drift_status: 'matched' | 'version_mismatch' | 'missing' | 'extra' | 'unverified'
+  drift_detail: string | null
   providence_status: 'verified' | 'unverified'
   policy_status: 'pass' | 'fail' | 'unverified'
   repo_stars: number | null

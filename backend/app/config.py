@@ -35,3 +35,12 @@ CARABINER_TIMEOUT = _float("LOOM_CARABINER_TIMEOUT", 120.0)
 PYPI_BASE = os.environ.get("LOOM_PYPI_BASE", "https://pypi.org/pypi")
 OSV_BASE = os.environ.get("LOOM_OSV_BASE", "https://api.osv.dev/v1")
 GITHUB_BASE = os.environ.get("LOOM_GITHUB_BASE", "https://api.github.com")
+
+# Phase 2 (SPEC.md §7.2 point 2, §10) — the sandboxed drift signal.
+# Auto-detected at call time (app/signals/drift.py's sandbox_available()),
+# not gated by a separate on/off flag here: if Docker isn't reachable in
+# this deployment, drift honestly reads unverified rather than needing a
+# human to remember to also flip a switch.
+DRIFT_IMAGE = os.environ.get("LOOM_DRIFT_IMAGE", "loom-drift-worker:local")
+DRIFT_INSTALL_TIMEOUT = _float("LOOM_DRIFT_INSTALL_TIMEOUT", 180.0)
+DRIFT_CHECK_TIMEOUT = _float("LOOM_DRIFT_CHECK_TIMEOUT", 30.0)

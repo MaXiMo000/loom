@@ -10,8 +10,10 @@ export function Legend({ scan }: { scan: Scan }) {
       <div className="legend-row">size ∝ how many packages depend on it</div>
       <div className="legend-note">
         Showing {scan.nodes.length} of {scan.total_package_count} dependencies,
-        depth-capped at {scan.depth_cap} levels (SPEC.md §7.2). Drift and policy
-        signals are always <code>unverified</code> in this phase — not computed yet.
+        depth-capped at {scan.depth_cap} levels (SPEC.md §7.2). Drift reads{' '}
+        <code>unverified</code> when the sandbox isn't available in this
+        deployment; policy is deferred past v1 (SPEC.md §7.2/§10) — bring
+        your own invariant.yaml.
       </div>
     </div>
   )

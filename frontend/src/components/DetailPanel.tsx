@@ -48,6 +48,7 @@ export function DetailPanel({ node, onClose }: { node: ScanNode | null; onClose:
         </div>
 
         {node.vuln_detail && <p className="dive__detail">{node.vuln_detail}</p>}
+        {node.drift_detail && <p className="dive__detail">{node.drift_detail}</p>}
 
         <div className="dive__meta">
           {node.repo_stars != null && <div>★ {node.repo_stars.toLocaleString()} stars</div>}

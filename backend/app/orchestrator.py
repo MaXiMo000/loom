@@ -18,6 +18,7 @@ from app.models import Edge, Node, Scan
 from app.resolve.clone import CloneError, clone_repo
 from app.resolve.graph import resolve_graph
 from app.resolve.lockfile import find_lockfile, parse_lockfile
+from app.signals.drift import compute_drift
 from app.signals.policy import check_policy
 from app.signals.providence import check_providence
 from app.signals.vuln import compute_vuln_severities
@@ -82,6 +83,13 @@ def run_scan(session_factory, scan_id: str) -> None:
         finally:
             osv.close()
 
+        # Phase 2 (SPEC.md §7.2 point 2, §10) — sandboxed, sits behind its
+        # own auto-detection (app/signals/drift.py's sandbox_available()):
+        # honestly unverified wherever Docker isn't reachable, never a
+        # guess, so this call is always safe to make regardless of
+        # deployment.
+        drift_by_name = compute_drift(lockfile_kind, lockfile_path, graph.nodes)
+
         # Node model (SPEC.md §7.6) has no providence/policy *detail* column
         # (unlike vuln_detail) — only the repo-wide status. The detail
         # strings are still real and used in tests/logs; not stored, since
@@ -95,6 +103,7 @@ def run_scan(session_factory, scan_id: str) -> None:
         try:
             for rn in graph.nodes:
                 vuln_severity, vuln_detail = vuln_by_name.get(rn.name, ("unverified", None))
+                drift_status, drift_detail = drift_by_name.get(rn.name, ("unverified", None))
                 stars, last_commit = None, None
                 if rn.github_repo:
                     meta = github.repo_meta(*rn.github_repo)
@@ -110,7 +119,8 @@ def run_scan(session_factory, scan_id: str) -> None:
                     depth=rn.depth,
                     vuln_severity=vuln_severity,
                     vuln_detail=vuln_detail,
-                    drift_status="unverified",
+                    drift_status=drift_status,
+                    drift_detail=drift_detail,
                     providence_status=providence_status,
                     policy_status=policy_status,
                     repo_stars=stars,

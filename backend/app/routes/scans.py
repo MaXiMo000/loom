@@ -38,6 +38,7 @@ def _scan_to_dict(scan: Scan) -> dict:
                 "vuln_severity": n.vuln_severity,
                 "vuln_detail": n.vuln_detail,
                 "drift_status": n.drift_status,
+                "drift_detail": n.drift_detail,
                 "providence_status": n.providence_status,
                 "policy_status": n.policy_status,
                 "repo_stars": n.repo_stars,

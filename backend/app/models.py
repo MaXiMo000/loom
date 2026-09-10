@@ -50,6 +50,11 @@ class Node(Base):
     vuln_severity: Mapped[str] = mapped_column(String, default="unverified")
     vuln_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     drift_status: Mapped[str] = mapped_column(String, default="unverified")
+    # Not in SPEC.md §7.6's original table (only vuln_detail is) — added to
+    # match it exactly, once Phase 2 gave drift a real per-package "receipt,
+    # not a claim" (lockstep's own detail string) worth keeping, the same
+    # reason vuln_detail exists at all.
+    drift_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     providence_status: Mapped[str] = mapped_column(String, default="unverified")
     policy_status: Mapped[str] = mapped_column(String, default="unverified")
     repo_stars: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -54,7 +54,7 @@ def _mock_pypi_and_osv():
 
 
 @respx.mock
-def test_full_scan_against_real_local_repo_and_fixtures(tmp_path):
+def test_full_scan_against_real_local_repo_and_fixtures(tmp_path, drift_image):
     repo_url = _make_local_repo(tmp_path)
     _mock_pypi_and_osv()
 
@@ -84,7 +84,12 @@ def test_full_scan_against_real_local_repo_and_fixtures(tmp_path):
         assert by_name["click"].vuln_severity == "none"
 
         assert all(n.providence_status == "unverified" for n in scan.nodes)  # no bundle in this fixture repo
-        assert all(n.drift_status == "unverified" for n in scan.nodes)  # Phase 2, not built yet
+        # Phase 2's real sandbox: installing exactly this closure into a
+        # fresh venv and diffing it against itself is, correctly, a clean
+        # match for every package — see app/signals/drift.py's own
+        # docstring for why that's still a real, non-tautological check.
+        assert all(n.drift_status == "matched" for n in scan.nodes), {n.package_name: n.drift_status for n in scan.nodes}
+        assert by_name["flask"].drift_detail == "'flask' matches its locked version 3.0.3"
         assert len(scan.edges) > 0
     finally:
         session.close()
