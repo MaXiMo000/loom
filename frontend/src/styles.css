@@ -1,0 +1,86 @@
+/* Design tokens lifted directly from portfolio/web/src/styles.css's :root
+   block (SPEC.md §8.2 — hard constraint, not a suggestion: loom reads as
+   the same family on sight). Fonts are self-hosted (src/fonts.css, copied
+   verbatim from the portfolio). */
+:root{
+  --void:#08090C; --chalk:#EDECE8; --alloy:#98A3B1;
+  --beam:#86E9DE; --escalate:#E8873B; --hair:rgba(255,255,255,.07);
+  --disp:"Archivo","Helvetica Neue",system-ui,sans-serif;
+  --serif:"Instrument Serif",Georgia,serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body,#root{height:100%}
+body{background:var(--void);color:var(--chalk);font-family:var(--disp);
+  -webkit-font-smoothing:antialiased;overflow:hidden}
+a:focus-visible,[href]:focus-visible,button:focus-visible,input:focus-visible{
+  outline:2px solid var(--beam);outline-offset:2px}
+
+.app{position:relative;width:100vw;height:100vh}
+.scene-root{position:relative;width:100%;height:100%}
+canvas{display:block}
+
+/* ---------------- top HUD: brand + scan form ---------------- */
+.hud-top{position:fixed;top:0;left:0;right:0;z-index:5;display:flex;
+  align-items:center;gap:24px;padding:22px 28px;pointer-events:none}
+.hud-top > *{pointer-events:auto}
+.brand{font-size:13px;letter-spacing:.24em;text-transform:uppercase;font-weight:600}
+.brand em{font-family:var(--serif);font-style:italic;color:var(--beam);font-weight:400}
+.tagline{font-family:var(--mono);font-size:10px;color:#8791A0;letter-spacing:.04em}
+
+.scan-form{margin-left:auto;display:flex;gap:8px;align-items:center}
+.scan-form input{background:rgba(255,255,255,.04);border:1px solid var(--hair);
+  color:var(--chalk);font-family:var(--mono);font-size:11px;padding:9px 12px;
+  border-radius:2px;width:340px}
+.scan-form input::placeholder{color:#5C6572}
+.scan-form input:disabled{opacity:.5}
+.scan-form button{background:transparent;border:1px solid var(--hair);
+  color:var(--chalk);font-family:var(--disp);font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;padding:9px 16px;border-radius:2px;cursor:not-allowed;opacity:.5}
+
+/* ---------------- legend: corner-anchored, always visible ---------------- */
+.legend{position:fixed;left:28px;bottom:24px;z-index:5;
+  background:rgba(8,9,12,.7);backdrop-filter:blur(14px);
+  border:1px solid var(--hair);border-radius:3px;padding:14px 16px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.02em;min-width:220px}
+.legend h4{font-family:var(--disp);font-size:9px;letter-spacing:.22em;
+  text-transform:uppercase;color:#8791A0;margin-bottom:10px;font-weight:600}
+.legend-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;color:#C7C9CC}
+.legend-swatch{width:9px;height:9px;border-radius:50%;flex:none}
+.legend-note{margin-top:10px;padding-top:10px;border-top:1px solid var(--hair);
+  color:#7E8794;font-size:9.5px;line-height:1.5}
+
+/* ---------------- detail panel: reuses portfolio's DeepDive pattern ---------------- */
+.dive-backdrop{position:fixed;inset:0;z-index:20;
+  background:rgba(8,9,12,.55);backdrop-filter:blur(3px);
+  display:flex;justify-content:flex-end}
+.dive{width:min(420px,92vw);height:100%;background:#0C0D11;
+  border-left:1px solid var(--hair);padding:32px 30px;overflow-y:auto;position:relative}
+.dive__close{position:absolute;top:24px;right:24px;background:transparent;
+  border:1px solid var(--hair);color:var(--chalk);font-family:var(--mono);
+  font-size:10px;padding:6px 12px;border-radius:2px;cursor:pointer}
+.dive__close:hover{border-color:var(--beam);color:var(--beam)}
+.eyebrow{font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;
+  text-transform:uppercase;color:#7E8794;margin-bottom:6px}
+.dive__title{font-family:var(--disp);font-size:22px;font-weight:600;margin-bottom:2px}
+.dive__version{font-family:var(--mono);font-size:12px;color:#8791A0;margin-bottom:22px}
+.dive__signals{display:flex;flex-direction:column;gap:10px;margin-bottom:24px}
+.signal{display:flex;justify-content:space-between;align-items:baseline;
+  padding:10px 12px;background:rgba(255,255,255,.03);border-radius:2px;
+  border-left:2px solid var(--alloy)}
+.signal.bad{border-left-color:var(--escalate)}
+.signal.good{border-left-color:var(--beam)}
+.signal-label{font-size:11px;color:#C7C9CC}
+.signal-value{font-family:var(--mono);font-size:11px;text-align:right}
+.signal-value.bad{color:var(--escalate)}
+.signal-value.good{color:var(--beam)}
+.signal-value.neutral{color:#7E8794}
+.dive__detail{font-size:12px;line-height:1.6;color:#B7BAC0;margin-top:4px}
+.dive__meta{margin-top:22px;padding-top:16px;border-top:1px solid var(--hair);
+  font-family:var(--mono);font-size:10px;color:#7E8794;line-height:1.8}
+
+/* ---------------- reduced-motion / off-mode notice ---------------- */
+.mode-notice{position:fixed;bottom:24px;right:28px;z-index:5;
+  font-family:var(--mono);font-size:9.5px;color:#7E8794;
+  background:rgba(8,9,12,.7);border:1px solid var(--hair);border-radius:2px;
+  padding:6px 10px}
