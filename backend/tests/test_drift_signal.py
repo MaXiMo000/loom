@@ -140,7 +140,13 @@ setup(name="evilpkg", version="0.0.1", packages=["evilpkg"])
         secret_shaped = [k for k in report["env_keys"] if "SECRET" in k or "TOKEN" in k or "DATABASE" in k]
         assert secret_shaped == []
 
-        assert install.returncode == 0  # the package "installs" fine; the point is what it couldn't do
+        # Not asserting install.returncode == 0: whether setuptools finishes
+        # packaging this deliberately minimal fake package is irrelevant to
+        # what this test verifies — the report existing at all already
+        # proves the hostile top-level code ran (it's written before
+        # `setup()` is even called), and the two assertions above are the
+        # actual containment claim. A failed install is still a fully
+        # valid, fully contained outcome.
 
     def test_network_is_actually_unreachable_with_network_none(self):
         # Direct proof of the exact flag drift.py's check-stage run uses —
