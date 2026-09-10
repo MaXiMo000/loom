@@ -1,13 +1,123 @@
 # loom
 
-Phase 0 (walking skeleton) is done — see [`HANDOFF.md`](HANDOFF.md) for
-what's actually running and what's next. Real scanning (cloning a repo,
-resolving its real dependency graph) doesn't exist yet.
+[![ci](https://github.com/MaXiMo000/loom/actions/workflows/ci.yml/badge.svg)](https://github.com/MaXiMo000/loom/actions/workflows/ci.yml)
 
-**Read [`SPEC.md`](SPEC.md)** for the full architecture: what this is, why,
-the scope decisions and their reasoning, the data model, the API, the 3D
-rendering approach, and the phased build order.
+**Weaves four separate tools' answers about one dependency tree — vulnerable?
+drifted? tamper-evident? — into a single 3D graph you can actually walk
+through.**
 
-This README gets its real, public-facing rewrite once Phase 1 lands real
-scanning (see SPEC.md §9's own note on not front-loading marketing copy
-before the project exists).
+Point it at a public GitHub repo with a real, fully-pinned Python lockfile.
+It clones the repo, resolves the real dependency graph from PyPI metadata,
+and renders every package as a node in an explorable 3D scene — colored,
+sized, and annotated by real signals, not synthetic ones. Click a node, see
+exactly why it's colored that way, with the real evidence behind it.
+
+```
+flask 3.0.3 · depth 0
+  Vulnerability          medium
+  Drift (lockstep)       matched
+  Tamper-evidence         unverified
+  Policy (invariant)      unverified
+
+  carabiner[DEP-CVE-2026-27205]: flask 3.0.3: CVE-2026-27205
+  'flask' matches its locked version 3.0.3
+
+  ★ 73,557 stars · last commit 08/09/2026
+```
+
+(Real output, from a real scan — `carabiner`'s own `osv-scanner`-backed
+engine found that CVE directly; a plain OSV.dev query for the same package
+alone hadn't surfaced it, which is the entire reason loom checks both.)
+
+## Why this, why now
+
+Four repos in this portfolio each independently answer a piece of "can I
+trust this dependency tree": [`carabiner`](https://github.com/MaXiMo000/carabiner)
+(known CVEs, secrets, misconfig), [`lockstep`](https://github.com/MaXiMo000/lockstep)
+(does what's installed match the lockfile), [`providence`](https://github.com/MaXiMo000/providence)
+(is there a tamper-evident record at all — usually: no), and
+[`invariant`](https://github.com/MaXiMo000/invariant) (does a declared
+policy still hold). Nobody had put all four answers on one picture. loom
+doesn't reimplement any of them — it shells out to the real CLIs, the same
+way `invariant`'s own `security_scan` check type already does.
+
+## How it works
+
+1. **Clone** — a real, shallow `git clone` of the repo you submit.
+2. **Resolve** — parses the repo's own `requirements.txt` (pip-compile
+   output) or `poetry.lock`, then walks PyPI's `requires_dist` metadata to
+   build the real dependency graph, depth-capped (default 3 levels — stated
+   on screen, not hidden in a tooltip).
+3. **Scan**, per package:
+   - **Vulnerability** — a real `carabiner scan --json` plus a direct
+     OSV.dev query for every node, worst severity wins.
+   - **Drift** — a real, sandboxed `lockstep check`: two short-lived,
+     non-root, capability-dropped, resource-capped Docker containers per
+     scan — one to install the repo's own lockfile into a fresh venv
+     (network enabled, has to reach PyPI), one to run the actual check
+     (`--network=none`, since it only reads local metadata and has no
+     legitimate reason to ever call out). Reads `unverified` with a stated
+     reason wherever Docker isn't available in a given deployment — never
+     guessed.
+   - **Tamper-evidence** — checks for a real Providence bundle. Almost
+     every repo has none; that absence is itself the finding.
+   - **Policy** — deferred past v1 on purpose rather than inventing a
+     generic policy nobody asked for. Bring your own `invariant.yaml`.
+4. **Render** — a real 3D force-directed graph (`d3-force-3d`, hand-rolled
+   R3F node rendering so every node is a real clickable mesh), auto-framed
+   to whatever the layout actually produces.
+5. **Persist** — every scan is stored, so a repo scanned more than once
+   gets a real diff: which packages were added, removed, or changed
+   between two scans, package-name-keyed, chronologically resolved.
+
+## Run it locally
+
+```
+cd backend
+docker compose up -d                                   # real local Postgres
+docker build -t loom-drift-worker:local drift-worker/   # the drift sandbox
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/alembic upgrade head
+.venv/bin/uvicorn app.main:app --port 8123
+
+cd frontend && npm install && npm run dev
+```
+
+## What this does NOT do (stated, not silently skipped)
+
+- **Python only** (pip-compile/poetry lockfiles). npm/Cargo/Go are real,
+  sized future work, not attempted here.
+- **No live dependency resolution.** A repo with no recognized lockfile
+  gets a clear, honest error, never a guess.
+- **No write access to a scanned repo, ever.** loom only clones, greps,
+  and parses.
+- **No auth, no saved dashboards.** A scan is keyed by repo + commit, not
+  by a user.
+- **The drift signal needs Docker.** It's not available on every
+  deployment (notably: the current one — see `HANDOFF.md`), and reads an
+  honest `unverified` rather than a guess when it isn't there.
+
+## Tests
+
+```
+cd backend && .venv/bin/python -m pytest -q     # 48 tests
+cd frontend && npx vitest run                   # 6 tests
+```
+
+Real fixtures throughout, not synthetic one-liners: a real `pip-compile`
+output and a real `poetry lock` output (both generated by actually running
+the real tools), real recorded PyPI/OSV.dev API responses, a real
+end-to-end orchestrator run against a real local repo and a real Postgres,
+and — for the drift sandbox specifically — a real adversarial pass: a local
+package whose `setup.py` tries to escape the sandbox, phone home, and read
+secrets from the environment, run against the real Docker image and
+confirmed contained on all three.
+
+## Read more
+
+- [`SPEC.md`](SPEC.md) — the full architecture: scope decisions and their
+  reasoning, the data model, the API, the 3D rendering approach.
+- [`HANDOFF.md`](HANDOFF.md) — what's actually running, every decision
+  made along the way, and what's next.
+
+MIT licensed.
