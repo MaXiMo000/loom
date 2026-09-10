@@ -67,7 +67,7 @@ carabiner/lockstep subprocess. That's Phase 1.
   routes have real Phase-0 behavior behind them, so the frontend never has
   to change its API surface later.
 - **CI**: `actions/checkout`/`actions/setup-python` pins copied from
-  `lockstep`'s already-vetted `ci.yml`; `actions/setup-node@v4` is a tag
+  `lockstep`'s already-vetted `ci.yml`; `actions/setup-node@v5` is a tag
   ref, not a pinned sha, since no vetted pin for it exists elsewhere in
   this portfolio yet — a minor, known inconsistency, not a security
   regression for a personal-portfolio CI job.
