@@ -374,12 +374,127 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cd frontend && npm install && npm run dev -- --port 5190 --strictPort
 ```
 
-### Next (Phase 3, SPEC.md §10)
+## 2026-09-10 (same day): Phase 3 — diff, history, deploy config — mostly done
 
-`/diff` endpoint's real node-level implementation + UI, the `HistoryRail`
-(deferred twice now — SPEC.md §8.4 pairs it with `/diff`, landing both
-together), deploy to Render (SPEC.md §12 — including deciding for real
-whether the drift-signal worker gets its own Docker-capable Render
-service, or whether Phase 2's sandbox gets reimplemented as a
-resource-limited subprocess for that specific deployment target, per the
-decision recorded above), a real Lighthouse-style pass on the frontend.
+**What's running now**: `GET /api/scans/{id}/diff/{other_id}` is real
+(`app/diff.py`) — package-name-keyed diff between two complete scans of
+the same repo, `older`/`newer` resolved by actual `created_at` regardless
+of which id the caller passes first, reporting `added`/`removed`/`changed`
+per package (version and/or any of the four signal statuses) plus an
+`unchanged_count`. The frontend's `HistoryRail` (ported visual language
+from `portfolio/web`'s own `.rail`) and `DiffPanel` are both real and wired
+in — submitting a scan now shows existing history for that repo
+immediately (doesn't wait for the new scan to finish), clicking a past
+scan reloads its full graph, and the Δ button next to any scan with a
+predecessor opens a real diff. `DetailPanel` and `DiffPanel` now share one
+`useModalPanel` hook (focus/inert/Escape) instead of duplicating it a
+second time.
+
+Render deploy config is written and validated as far as it can be without
+a live Render account: `render.yaml` (a `loom-api` Docker web service, a
+`loom-web` static site, a managed `loom-db` Postgres), `backend/Dockerfile`
+(built and run locally against the real Postgres — migrations ran, health
+check answered 200, this is not a hand-wave), a CI `lighthouse` job
+against the real frontend build (same informational, never-a-gate
+discipline as `portfolio/web`'s own job — its `ci.yml` comment is the real
+reasoning, not repeated here).
+
+### Decisions made
+
+- **`render.yaml`'s field names came from actually fetching and reading
+  Render's real current blueprint-spec docs** (not recalled/guessed) —
+  worth stating because one specific thing in there is easy to get wrong
+  silently: Render's Blueprint format has **no variable interpolation**,
+  and `fromService` only exposes a web service's *private*-network
+  `host`/`port`/`hostport`, never a public URL. `VITE_API_BASE` (baked
+  into the static site's build) has to be a literal
+  `https://loom-api.onrender.com` string, constructed by hand from
+  `loom-api`'s own `name` field (Render's public hostname for any service
+  is always `https://<name>.onrender.com`) — not a `fromService`
+  reference, because no such reference exists for this.
+- **The frontend now has a real build-time API base** (`frontend/src/
+  api.ts`'s `API_BASE`, `import.meta.env.VITE_API_BASE`) instead of only
+  relative `/api/...` paths — those only ever worked because dev's
+  `vite.config.ts` proxies `/api` to the local backend; a real deployed
+  static site has a different origin than the API entirely, so this was
+  a real gap, not deploy polish.
+- **CORS is now configurable** (`LOOM_ALLOWED_ORIGIN`, `app/config.py`),
+  defaulting to `*` for local dev — `render.yaml` sets it to the real
+  `loom-web` origin in the actual deployment.
+- **What's still explicitly not done, and why it's not a silent gap**:
+  actually creating the Render services — connecting the GitHub repo,
+  running "New Blueprint" in Render's dashboard, confirming the plan/
+  billing prompts — needs the user's own Render account and action.
+  This session has no Render API key or CLI session and won't attempt to
+  authenticate as the user or make billing-relevant infrastructure
+  choices on their behalf. Matches this portfolio's own established
+  precedent for an account-bound step no session can complete alone (see
+  `custody`'s own HANDOFF entry on its hook-registration gap) — the
+  config is real and locally validated; turning it into a live URL is the
+  one remaining step that has to happen at a keyboard with the actual
+  account logged in.
+- **The drift-signal-worker-on-Render question from Phase 2's HANDOFF
+  entry stays open**, correctly — `render.yaml` doesn't attempt a
+  Docker-capable worker service for it. Once the API/web services are
+  actually live, the real next call is either a second Render service
+  with Docker access for the sandbox, or reimplementing SPEC.md §7.2's
+  weaker "sandboxed subprocess, no network after install" path for this
+  specific deployment target — a decision worth making with a live
+  deployment in front of it, not in the abstract.
+
+### Verified
+
+- Backend: **48 passed** (was 36) — 12 new: `tests/test_diff.py` (pure
+  `diff_nodes` logic, including SPEC.md §10's own headline scenario
+  verbatim: "matched → version_mismatch") and `tests/test_routes.py`
+  (the real HTTP diff endpoint against a real Postgres: 404s, the
+  different-repos 422, the incomplete-scan 409, and a real drift-over-time
+  round trip requested in reverse id order to confirm `from`/`to` really
+  resolve by `created_at`, not request order).
+- Frontend: `npx vitest run` (6 passed), `npx tsc -b` clean, `npx vite
+  build` clean.
+- **The backend Dockerfile was actually built and run**, not just
+  written: `docker build`, then run against the real local Postgres with
+  `DATABASE_URL` pointed at it — logs show a real `alembic upgrade head`
+  followed by uvicorn starting, and `GET /health` answered `200 {"status":
+  "ok"}` from inside the container. This is the same image `render.yaml`
+  tells Render to build.
+- **Live-verified the full diff/history flow through the real browser**:
+  scanned a real local repo twice (bumping `click`'s pinned version down
+  and dropping `blinker` between the two commits), watched the rail show
+  both real scans, clicked Δ, and got a real diff — including a genuine
+  emergent finding neither scan alone would have surfaced: the "version
+  bump" from 8.5.0 down to 8.1.7 came with `vuln_severity none → high`,
+  a real vulnerability regression from downgrading one package, exactly
+  the "drift over time" story SPEC.md §3's persistence decision exists to
+  tell. Selecting the oldest scan from the rail correctly reloaded its
+  own 7-node graph (vs. the newer 6-node one), confirming history
+  navigation loads real, distinct, correctly-attributed past state.
+
+### Run it locally
+
+```
+cd backend
+docker compose up -d                                   # real local Postgres
+docker build -t loom-drift-worker:local drift-worker/   # the drift sandbox image
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/alembic upgrade head
+.venv/bin/uvicorn app.main:app --port 8123
+
+cd frontend && npm install && npm run dev -- --port 5190 --strictPort
+```
+
+### Next
+
+1. **Deploy for real** (needs the user): from Render's dashboard, connect
+   the `MaXiMo000/loom` GitHub repo and sync `render.yaml` as a new
+   Blueprint. Confirm `loom-api`'s and `loom-web`'s actual assigned
+   `onrender.com` names match what `render.yaml` hardcoded (`loom-api`,
+   `loom-web`) — if either name was already taken on Render's platform,
+   the real name will differ and both `LOOM_ALLOWED_ORIGIN` and
+   `VITE_API_BASE` need a one-line fix to match.
+2. Once live, decide the drift-signal-worker-on-Render question above
+   with a real deployment in front of it.
+3. Anything SPEC.md §10 calls out as explicitly out of scope for any v1
+   phase stays out of scope: the `invariant` policy signal, npm/Cargo
+   ecosystems, auth, scheduled re-scans, WebSocket live-reveal.

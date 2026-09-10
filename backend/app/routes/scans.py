@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import DEPTH_CAP_DEFAULT
 from app.db import SessionLocal, get_session
+from app.diff import diff_nodes
 from app.models import Scan
 from app.orchestrator import run_scan
 
@@ -104,9 +105,22 @@ def diff_scans(scan_id: str, other_id: str, session: Session = Depends(get_sessi
     b = session.get(Scan, other_id)
     if a is None or b is None:
         raise HTTPException(status_code=404, detail="unknown scan id")
+    if a.repo_url != b.repo_url:
+        raise HTTPException(status_code=422, detail="both scans must be of the same repo_url")
+    if a.status != "complete" or b.status != "complete":
+        raise HTTPException(status_code=409, detail="both scans must be complete to diff")
 
-    # Real node-level diffing (matched vs. changed severity/drift per
-    # package across two real scans) is Phase 3 (SPEC.md §10). Phase 1
-    # ships the real route + an honest empty result rather than blocking
-    # the frontend's API surface on it.
-    return {"scan_id": scan_id, "other_id": other_id, "changes": [], "note": "full node-level diffing lands in Phase 3"}
+    # "Older"/"newer" by when the scan actually ran, regardless of which
+    # id the caller passed as {scan_id} vs {other_id} — "drift over time"
+    # (SPEC.md §3) only means something in one direction.
+    older, newer = (a, b) if a.created_at <= b.created_at else (b, a)
+    changes = diff_nodes(older.nodes, newer.nodes)
+    changed_names = {c["package_name"] for c in changes}
+    common_names = {n.package_name for n in older.nodes} & {n.package_name for n in newer.nodes}
+
+    return {
+        "from_scan": {"id": older.id, "created_at": older.created_at.isoformat()},
+        "to_scan": {"id": newer.id, "created_at": newer.created_at.isoformat()},
+        "changes": changes,
+        "unchanged_count": len(common_names - changed_names),
+    }

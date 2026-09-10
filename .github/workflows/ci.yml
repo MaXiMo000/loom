@@ -58,3 +58,25 @@ jobs:
       - run: npm install
       - run: npm test
       - run: npm run build
+
+  lighthouse:
+    # Same discipline as portfolio/web's own lighthouse job (its ci.yml
+    # comment is the real reasoning, not repeated here): this runner has no
+    # GPU, so a headless/software-rendered score on the WebGL-heavy graph
+    # scene is a different measurement setup than a real browser — never a
+    # gate, just an automated, repeatable, published report every run.
+    runs-on: ubuntu-latest
+    needs: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: npm install
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - uses: treosh/lighthouse-ci-action@3e7e23fb74242897f95c0ba9cabad3d0227b9b18  # v12.6.2
+        with:
+          configPath: ./lighthouserc.json
+          uploadArtifacts: true

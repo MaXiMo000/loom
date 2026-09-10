@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { createScan, getScan, type Scan } from './api'
+import { createScan, getDiff, getScan, listScans, type Diff, type Scan, type ScanSummary } from './api'
 import { DetailPanel } from './components/DetailPanel'
+import { DiffPanel } from './components/DiffPanel'
+import { HistoryRail } from './components/HistoryRail'
 import { Legend } from './components/Legend'
 import { ScanForm } from './components/ScanForm'
 import { MODE } from './lib/mode'
@@ -22,14 +24,30 @@ export function App() {
   const [scanId, setScanId] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [history, setHistory] = useState<ScanSummary[]>([])
+  const [diff, setDiff] = useState<Diff | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+
+  // Refresh the history rail whenever the currently-viewed scan settles
+  // (complete/failed) — including the very first scan of a repo, so the
+  // rail appears the moment there's real history to show (SPEC.md §8.4).
+  useEffect(() => {
+    if (scan && (scan.status === 'complete' || scan.status === 'failed')) {
+      listScans(scan.repo_url).then(setHistory).catch(() => {})
+    }
+  }, [scan?.status, scan?.repo_url])
 
   function startScan(repoUrl: string) {
     setSubmitError(null)
     setScan(null)
     setSelectedId(null)
+    setDiff(null)
+    // Existing history for this repo shouldn't wait for the new scan to
+    // finish — a repo scanned before already has real history worth
+    // showing immediately.
+    listScans(repoUrl).then(setHistory).catch(() => {})
     createScan(repoUrl)
       .then(({ id }) => {
         setScanId(id)
@@ -46,16 +64,29 @@ export function App() {
       .catch((e) => setSubmitError(String(e)))
   }
 
+  function selectFromHistory(id: string) {
+    if (pollRef.current) clearInterval(pollRef.current)
+    setSelectedId(null)
+    setDiff(null)
+    setScanId(id)
+    getScan(id).then(setScan).catch((e) => setSubmitError(String(e)))
+  }
+
+  function compare(id: string, previousId: string) {
+    setSelectedId(null)
+    getDiff(id, previousId).then(setDiff).catch((e) => setSubmitError(String(e)))
+  }
+
   const busy = scanId !== null && scan?.status !== 'complete' && scan?.status !== 'failed'
   const selected = scan?.nodes.find((n) => n.id === selectedId) ?? null
 
   return (
     <div className="app">
-      {/* DetailPanel below is a SIBLING of this wrapper, not a descendant —
-          it sets `inert` on `.scene-root` while open (portfolio's own
-          DeepDive/`<main>` split, App.tsx:112+358); if the panel were nested
-          inside the element it inerts, its own Close button would inert
-          itself. */}
+      {/* DetailPanel/DiffPanel below are SIBLINGs of this wrapper, not
+          descendants — each sets `inert` on `.scene-root` while open
+          (portfolio's own DeepDive/`<main>` split, App.tsx:112+358); if a
+          panel were nested inside the element it inerts, its own Close
+          button would inert itself. */}
       <div className="scene-root">
         <div className="hud-top">
           <div className="brand"><em>loom</em> — weaves four tools' answers into one graph</div>
@@ -102,8 +133,10 @@ export function App() {
         )}
 
         {scan && scan.status === 'complete' && <Legend scan={scan} />}
+        <HistoryRail scans={history} currentId={scanId} onSelect={selectFromHistory} onCompare={compare} />
       </div>
       <DetailPanel node={selected} onClose={() => setSelectedId(null)} />
+      <DiffPanel diff={diff} onClose={() => setDiff(null)} />
     </div>
   )
 }

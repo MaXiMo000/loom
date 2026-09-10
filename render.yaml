@@ -1,0 +1,57 @@
+# Render blueprint (SPEC.md §12): a web service for the FastAPI backend,
+# a static site for the Vite build, a managed Postgres — matching the
+# recur/LabLedger precedent this repo's own SPEC.md names, adapted for
+# loom's own split (no shared-origin cookie constraint recur has, since
+# loom has no auth — SPEC.md §3 — so a separate static-site origin for
+# the frontend is the simpler, cheaper default here, exactly as SPEC.md
+# §8.1/§12 already call for).
+#
+# Render doesn't support variable interpolation in this file — the
+# frontend's VITE_API_BASE below is a literal string, not a computed
+# reference, because it has to be the API service's real PUBLIC url
+# (fromService only exposes the *private*-network host:port for web
+# services, which a browser can't reach at all). It has to match `name:
+# loom-api` below by construction: Render's public hostname for a service
+# is always https://<name>.onrender.com.
+#
+# NOT included here (see HANDOFF.md's Phase 2 entry for the real reasoning,
+# not repeated here): the drift-signal sandbox. Standard Render web
+# services don't expose a Docker daemon, so app/signals/drift.py's
+# sandbox_available() check correctly returns false here and every node's
+# drift_status reads an honest `unverified` — real, not a bug, until a
+# Docker-capable worker exists for this specific deployment.
+
+databases:
+  - name: loom-db
+    databaseName: loom
+    user: loom
+    plan: free
+    ipAllowList: [] # private-network only, not open to the internet
+
+services:
+  - type: web
+    name: loom-api
+    runtime: docker
+    plan: free
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: loom-db
+          property: connectionString
+      - key: LOOM_ALLOWED_ORIGIN
+        value: https://loom-web.onrender.com
+
+  - type: web
+    name: loom-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_BASE
+        value: https://loom-api.onrender.com

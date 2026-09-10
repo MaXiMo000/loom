@@ -1,29 +1,9 @@
-import { useEffect, useRef } from 'react'
 import type { ScanNode } from '../api'
+import { useModalPanel } from '../lib/useModalPanel'
 
-/** Click-a-node → detail panel. Focus/inert/Escape handling ported directly
- * from portfolio/web/src/DeepDive.tsx's own pattern (SPEC.md §8.3) — native
- * `inert` instead of a hand-rolled focus trap, focus returned on close. */
+/** Click-a-node → detail panel. */
 export function DetailPanel({ node, onClose }: { node: ScanNode | null; onClose: () => void }) {
-  const closeRef = useRef<HTMLButtonElement>(null)
-  const returnFocusTo = useRef<Element | null>(null)
-
-  useEffect(() => {
-    if (!node) return
-    returnFocusTo.current = document.activeElement
-    closeRef.current?.focus()
-
-    const root = document.querySelector('.scene-root')
-    root?.setAttribute('inert', '')
-
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      root?.removeAttribute('inert')
-      ;(returnFocusTo.current as HTMLElement | null)?.focus?.()
-    }
-  }, [node, onClose])
+  const closeRef = useModalPanel(node !== null, onClose)
 
   if (!node) return null
 

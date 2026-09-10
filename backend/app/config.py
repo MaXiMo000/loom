@@ -20,6 +20,10 @@ DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql+psycopg://loom:loom@127.0.0.1:5439/loom"
 )
 
+# "*" (any origin) is the local-dev default; SPEC.md §12's real deploy
+# sets LOOM_ALLOWED_ORIGIN to the actual static site origin.
+ALLOWED_ORIGINS = [os.environ.get("LOOM_ALLOWED_ORIGIN", "*")]
+
 DEPTH_CAP_DEFAULT = _int("LOOM_DEPTH_CAP", 3)
 
 # Defensive guard against a pathological lockfile, not the depth-cap
