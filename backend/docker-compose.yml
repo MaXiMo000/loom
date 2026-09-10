@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: loom
+      POSTGRES_PASSWORD: loom
+      POSTGRES_DB: loom
+    ports:
+      # 127.0.0.1 is load-bearing, not decoration (recur's docker-compose.yml
+      # already learned this lesson) — plain "5439:5432" binds 0.0.0.0,
+      # exposing this DB to every network the host joins. 5439 avoids
+      # colliding with a locally-installed Postgres on its default port.
+      - "127.0.0.1:5439:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loom"]
+      interval: 3s
+      retries: 10
+
+volumes:
+  pgdata:

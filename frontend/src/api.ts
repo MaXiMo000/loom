@@ -1,7 +1,4 @@
-/** Typed client for the backend's 4 routes (SPEC.md §7.7). Phase 0: every
- * route is served by the backend's fixture, but the shapes here are the
- * real contract so nothing here needs to change once Phase 1 makes them
- * real. */
+/** Typed client for the backend's 4 real routes (SPEC.md §7.7). */
 
 export interface ScanNode {
   id: string
@@ -32,6 +29,7 @@ export interface Scan {
   error: string | null
   lockfile_kind: string | null
   depth_cap: number
+  total_package_count: number
   created_at: string
   completed_at: string | null
   nodes: ScanNode[]

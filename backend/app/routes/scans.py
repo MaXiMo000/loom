@@ -1,51 +1,111 @@
-"""The four scan endpoints from SPEC.md §7.7.
-
-Phase 0: every route returns the one hand-written fixture graph
-(app/fixtures.py) — no clone, no real orchestration, no Postgres. Real
-persistence and a real background job land in Phase 1 (SPEC.md §10);
-the route *shapes* here are the real, final contract so the frontend
-built against them today doesn't need to change later.
-"""
+"""The four scan endpoints from SPEC.md §7.7 — real Phase 1 behavior: a
+real clone, real lockfile parse, real PyPI/OSV/carabiner/providence
+signals (SPEC.md §10). Drift and policy stay honestly `unverified`."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
-from app.fixtures import FIXTURE_SCAN_ID, fixture_scan, fixture_scan_summary
+from app.config import DEPTH_CAP_DEFAULT
+from app.db import SessionLocal, get_session
+from app.models import Scan
+from app.orchestrator import run_scan
 
 router = APIRouter(prefix="/api/scans", tags=["scans"])
 
 
+def _scan_to_dict(scan: Scan) -> dict:
+    return {
+        "id": scan.id,
+        "repo_url": scan.repo_url,
+        "ref": scan.ref,
+        "commit_sha": scan.commit_sha,
+        "status": scan.status,
+        "error": scan.error,
+        "lockfile_kind": scan.lockfile_kind,
+        "depth_cap": scan.depth_cap,
+        "total_package_count": scan.total_package_count,
+        "created_at": scan.created_at.isoformat() if scan.created_at else None,
+        "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
+        "nodes": [
+            {
+                "id": n.id,
+                "package_name": n.package_name,
+                "package_version": n.package_version,
+                "depth": n.depth,
+                "vuln_severity": n.vuln_severity,
+                "vuln_detail": n.vuln_detail,
+                "drift_status": n.drift_status,
+                "providence_status": n.providence_status,
+                "policy_status": n.policy_status,
+                "repo_stars": n.repo_stars,
+                "repo_last_commit": n.repo_last_commit.isoformat() if n.repo_last_commit else None,
+            }
+            for n in scan.nodes
+        ],
+        "edges": [{"id": e.id, "from_node": e.from_node, "to_node": e.to_node} for e in scan.edges],
+    }
+
+
 @router.post("")
-def create_scan(body: dict) -> dict:
-    if not body.get("repo_url"):
+def create_scan(body: dict, background_tasks: BackgroundTasks, session: Session = Depends(get_session)) -> dict:
+    repo_url = body.get("repo_url")
+    if not repo_url:
         raise HTTPException(status_code=422, detail="repo_url is required")
-    # Phase 0 has no orchestrator — hand back the fixture id immediately,
-    # already "complete", instead of faking a pending->polling sequence.
-    return {"id": FIXTURE_SCAN_ID, "status": "complete"}
+
+    scan = Scan(repo_url=repo_url, ref=body.get("ref") or "HEAD", status="pending",
+                depth_cap=body.get("depth_cap") or DEPTH_CAP_DEFAULT)
+    session.add(scan)
+    session.commit()
+    session.refresh(scan)
+
+    # SessionLocal, not this request's `session` — the job runs on a
+    # BackgroundTasks thread after this response is sent, so it needs its
+    # own session rather than sharing one whose request-scoped session may
+    # already be closed (app/orchestrator.py's own docstring on why).
+    background_tasks.add_task(run_scan, SessionLocal, scan.id)
+
+    return {"id": scan.id, "status": scan.status}
 
 
 @router.get("/{scan_id}")
-def get_scan(scan_id: str) -> dict:
-    if scan_id != FIXTURE_SCAN_ID:
-        raise HTTPException(status_code=404, detail="unknown scan id (Phase 0 only serves the fixture scan)")
-    return fixture_scan()
+def get_scan(scan_id: str, session: Session = Depends(get_session)) -> dict:
+    scan = session.get(Scan, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="unknown scan id")
+    return _scan_to_dict(scan)
 
 
 @router.get("")
-def list_scans(repo_url: str | None = None) -> list[dict]:
-    # Phase 0: one fixture scan exists; real history comes with Phase 1
-    # persistence. repo_url is accepted (matches the real contract) but not
-    # filtered against yet since there's nothing else to filter out.
-    return [fixture_scan_summary()]
+def list_scans(repo_url: str | None = None, session: Session = Depends(get_session)) -> list[dict]:
+    query = session.query(Scan)
+    if repo_url:
+        query = query.filter(Scan.repo_url == repo_url)
+    scans = query.order_by(desc(Scan.created_at)).all()
+    return [
+        {
+            "id": s.id,
+            "repo_url": s.repo_url,
+            "ref": s.ref,
+            "status": s.status,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "node_count": len(s.nodes),
+        }
+        for s in scans
+    ]
 
 
 @router.get("/{scan_id}/diff/{other_id}")
-def diff_scans(scan_id: str, other_id: str) -> dict:
-    # Real node-level diffing needs two distinct persisted scans (Phase 3).
-    # Phase 0 has exactly one scan to compare against itself, so this is
-    # honestly an empty diff, not a fabricated one.
-    for sid in (scan_id, other_id):
-        if sid != FIXTURE_SCAN_ID:
-            raise HTTPException(status_code=404, detail="unknown scan id (Phase 0 only serves the fixture scan)")
-    return {"scan_id": scan_id, "other_id": other_id, "changes": [], "note": "diffing lands in Phase 3"}
+def diff_scans(scan_id: str, other_id: str, session: Session = Depends(get_session)) -> dict:
+    a = session.get(Scan, scan_id)
+    b = session.get(Scan, other_id)
+    if a is None or b is None:
+        raise HTTPException(status_code=404, detail="unknown scan id")
+
+    # Real node-level diffing (matched vs. changed severity/drift per
+    # package across two real scans) is Phase 3 (SPEC.md §10). Phase 1
+    # ships the real route + an honest empty result rather than blocking
+    # the frontend's API surface on it.
+    return {"scan_id": scan_id, "other_id": other_id, "changes": [], "note": "full node-level diffing lands in Phase 3"}

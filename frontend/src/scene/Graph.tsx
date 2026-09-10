@@ -29,7 +29,12 @@ export function Graph({ nodes, edges, onSelect }: {
           link constants produce — SPEC.md §13 says that tuning can't be
           right until real data is in front of it, so instead of guessing
           constants, Bounds auto-fits the camera to whatever comes out. */}
-      <Bounds fit clip observe margin={1.4}>
+      {/* No `observe`: the node set is static once a scan is complete, and
+          `observe` re-fits on any bounding-box change, including a mesh's
+          own hover material state — fit once (keyed on the graph itself)
+          instead of continuously watching for changes that shouldn't move
+          the camera. */}
+      <Bounds key={`${nodes.length}-${edges.length}`} fit clip margin={1.4}>
         {edges.map((e) => {
           const a = laidOut.get(e.from_node)
           const b = laidOut.get(e.to_node)

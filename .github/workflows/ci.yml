@@ -14,12 +14,35 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      # A real disposable Postgres, not sqlite/a mock — matches this
+      # portfolio's own test discipline (recur/LabLedger's own CI).
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: loom
+          POSTGRES_PASSWORD: loom
+          POSTGRES_DB: loom
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://loom:loom@127.0.0.1:5432/loom
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      - run: alembic upgrade head
+      # osv-scanner isn't installed here, so carabiner's `deps` engine has
+      # nothing to run and contributes no findings — the direct per-package
+      # OSV.dev calls (app/clients/osv.py) stay the real, complete
+      # vulnerability source either way; carabiner only ever adds to that
+      # (SPEC.md §7.2), so this doesn't weaken what CI actually checks.
       - run: pytest -q
 
   frontend:

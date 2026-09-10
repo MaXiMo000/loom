@@ -36,7 +36,19 @@ canvas{display:block}
 .scan-form input:disabled{opacity:.5}
 .scan-form button{background:transparent;border:1px solid var(--hair);
   color:var(--chalk);font-family:var(--disp);font-size:10px;letter-spacing:.18em;
-  text-transform:uppercase;padding:9px 16px;border-radius:2px;cursor:not-allowed;opacity:.5}
+  text-transform:uppercase;padding:9px 16px;border-radius:2px;cursor:pointer}
+.scan-form button:hover:not(:disabled){border-color:var(--beam);color:var(--beam)}
+.scan-form button:disabled{cursor:not-allowed;opacity:.5}
+
+/* ---------------- scan status: pending/cloning/resolving/scanning ---------------- */
+.scan-status{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;text-align:center}
+.scan-status .stage{font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--alloy)}
+.scan-status .stage em{color:var(--beam);font-style:normal}
+.scan-status .error{max-width:560px;color:#E8873B;font-family:var(--mono);
+  font-size:12px;line-height:1.6;padding:0 28px}
+.scan-status .hint{color:#5C6572;font-family:var(--mono);font-size:10px}
 
 /* ---------------- legend: corner-anchored, always visible ---------------- */
 .legend{position:fixed;left:28px;bottom:24px;z-index:5;

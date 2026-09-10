@@ -106,10 +106,149 @@ cd backend && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cd frontend && npm install && npm run dev -- --port 5190 --strictPort
 ```
 
-### Next (Phase 1, SPEC.md §10)
+## 2026-09-10 (same day): Phase 1 — real graph, real signals — done, live-verified
 
-Real clone, real lockfile parse (`requirements.txt`/`poetry.lock`), real
-PyPI-metadata-driven edges, real `carabiner` + direct OSV severity
-coloring, real `providence` bundle check. Drift (`lockstep`) and policy
-(`invariant`) stay honestly `unverified` until Phase 2 — do not fake a
-four-of-four picture early.
+**What's running now**: the fixture is gone (`backend/app/fixtures.py`
+deleted, nothing referenced it once real data flowed). `POST /api/scans`
+kicks a real `BackgroundTasks` job (`app/orchestrator.py`) that: shallow-
+clones the real repo over a real `git clone` subprocess (`app/resolve/
+clone.py`), finds and parses a real `requirements.txt`/`poetry.lock`
+(`app/resolve/lockfile.py`), resolves the real dependency graph by walking
+real PyPI `requires_dist` metadata with a depth cap (`app/resolve/
+graph.py`), computes real vulnerability severity from a real `carabiner
+scan --json` subprocess plus a real per-package OSV.dev `POST /v1/query`
+(`app/signals/vuln.py`), checks for a real Providence bundle
+(`app/signals/providence.py`, using the vendored `check_bundle` —
+`app/vendor/providence/`), and persists everything to a real Postgres
+(`app/models.py` + Alembic). Drift and policy stay honestly `unverified`
+(Phase 2/deferred, per SPEC.md §10 — not faked). The frontend's `ScanForm`
+is real and enabled now: submit a URL, watch real stage labels (cloning →
+resolving → scanning) as the UI polls `GET /api/scans/{id}` every 2s
+(SPEC.md §7.4), then the real 3D graph renders.
+
+### Decisions made (SPEC.md §13 + implementation calls along the way)
+
+- **PyPI-driven edges over `pip-compile`'s own `# via` comments.** A real
+  pip-compile `requirements.txt` already states its own edges as comments
+  (`# via requests`) — cheaper than an HTTP call per package. Went with
+  SPEC.md §6's explicit instruction (PyPI `requires_dist`) anyway, for one
+  reason: `poetry.lock` has no equivalent annotation, and a single
+  edge-resolution code path for both lockfile kinds beat two. Depth is
+  computed from the *derived* edges (BFS from in-degree-0 roots), not from
+  `# via` presence, for the same reason.
+- **Depth-cap fetching fetches the whole (size-capped) pinned closure up
+  front, not a true frontier-bounded BFS.** A real pip-compile lockfile is
+  already a finite, fully-resolved set — fetching PyPI metadata for all of
+  it (capped at `LOOM_MAX_PACKAGES`, default 150, a defensive guard
+  distinct from the user-facing "3 levels deep" disclosure) is simpler
+  than incrementally expanding a frontier level-by-level, and correct for
+  any realistic demo-sized repo. `# ponytail: revisit with real
+  incremental fetching if a huge lockfile makes a scan too slow.`
+- **`POST /v1/query` per node, not `/v1/querybatch`.** Checked both against
+  the real API: batch responses carry only vuln ids, no severity — and
+  severity is the entire point. The N-calls cost this implies is exactly
+  what SPEC.md §7.2 already says the depth cap exists to bound.
+- **carabiner-finding-to-node correlation is a best-effort substring match**
+  on the finding's own `message`/`path` text — carabiner's `Finding` has no
+  structured package-name field. Only ever *raises* a node's severity above
+  what OSV found directly, never lowers it. A real, live-verified case
+  actually exercised this for real (see below) — carabiner's own
+  `osv-scanner`-backed `deps` engine found a real CVE on `flask==3.0.3`
+  that this session's direct OSV query alone had NOT surfaced, and the
+  worst-of-both merge correctly picked it up.
+- **providence-evidence vendored, not pip-installed** — confirmed via
+  `pip index versions providence-evidence` that it's genuinely not
+  published yet (matches the parent portfolio's own HANDOFF notes).
+  `check.py`+`spec.py` copied verbatim from providence's real repo at a
+  pinned commit (`app/vendor/providence/__init__.py` records which one) —
+  MIT, same author, exactly SPEC.md §7.2's stated fallback.
+  `carabiner-sec`, by contrast, genuinely is on PyPI (confirmed the same
+  way) — it's a real `pip install` dependency, subprocess-invoked per
+  `invariant/checks/security_scan.py`'s exact pattern.
+- **Sync SQLAlchemy, not async.** Routes are sync `def`s (FastAPI runs
+  those in its own threadpool) and the scan job is a `BackgroundTasks`
+  function (also thread-run) — nothing here is high-concurrency enough to
+  need async SQLAlchemy on top.
+- **CI runs a real Postgres service container**, not sqlite — the same
+  "real disposable Postgres, not a mock" discipline `recur`/`LabLedger`
+  already hold themselves to in this portfolio. `osv-scanner` is
+  deliberately *not* installed in CI (carabiner's `deps` engine just finds
+  nothing to run without it) — the direct per-package OSV.dev calls stay
+  the real, complete vulnerability source regardless; carabiner only ever
+  adds to that.
+- **HistoryRail (SPEC.md §8.4) still deferred**, now past Phase 1 too.
+  Real scan history exists (`GET /api/scans?repo_url=...` is real and
+  tested) but the frontend doesn't surface it yet — SPEC.md pairs the
+  "compare to previous scan" affordance with the `/diff` endpoint, and
+  `/diff` is explicitly Phase 3. Landing both together avoids a rail that
+  can list scans but can't yet do anything with more than one.
+
+### Verified
+
+- Backend: `cd backend && .venv/bin/python -m pytest -q` — **28 passed**
+  (was 7). Real fixtures throughout, not synthetic one-liners (SPEC.md
+  §11): `tests/fixtures/requirements.txt` is a real `pip-compile` output
+  (flask==3.0.3 closure), `tests/fixtures/poetry.lock` a real
+  `poetry lock` output (requests==2.31.0) — both generated by actually
+  running the real tools. `tests/fixtures/pypi/*.json` and `tests/
+  fixtures/osv/*.json` are real recorded API responses (respx serves them
+  in tests — no live network in CI). `test_orchestrator.py` runs the real
+  orchestrator end-to-end against a real local git repo + real Postgres,
+  with only the two genuinely-external APIs (PyPI/OSV) mocked from those
+  same real recordings.
+- Frontend: `npx vitest run` — 6 passed, `npx tsc -b` clean, `npx vite
+  build` clean.
+- **Live-verified against real, live infrastructure** — not just the
+  fixtures above: started the real FastAPI app against a real local
+  Postgres (`docker compose up -d` in `backend/`, or the standalone `docker
+  run` in "Run it locally" below) and drove it two ways:
+  1. `POST /api/scans` for `https://github.com/MaXiMo000/lockstep` (a
+     real public repo, real network clone) — correctly ended `failed` with
+     the honest "no lockfile found" error, since `lockstep` genuinely has
+     no pip-compile/poetry lockfile. Proves the real-network clone path
+     and the honest-failure path together, for real.
+  2. `POST /api/scans` for a real local git repo seeded with the real
+     `flask==3.0.3` fixture lockfile — completed for real, hitting the
+     **real live PyPI and OSV.dev APIs** (not mocked): 7 nodes, 7 edges,
+     correct depths (flask=0, its direct deps=1, markupsafe=2, reached
+     only via jinja2/werkzeug). `flask` came back `vuln_severity: medium`
+     from a real carabiner-correlated finding (`CVE-2026-27205`) — a
+     genuine real-world hit, not a planted fixture.
+  3. Drove the same scan through the real browser UI end to end: typed a
+     URL, watched the real stage labels progress, watched the real 3D
+     graph render with `flask` correctly colored escalate-orange, clicked
+     it, and confirmed the detail panel showed the real carabiner finding
+     **and** real GitHub metadata (flask's real star count and last-commit
+     date, fetched live from `api.github.com` for `pallets/flask` — the
+     package's own upstream repo, not the scanned repo).
+  4. **A real bug found this way, not by a unit test**: clicking a node
+     made the camera visibly drift on every subsequent click. Root cause —
+     `<Bounds observe>` re-fits the camera to its children's live bounding
+     box, and `Node.tsx` scaled a node 1.15× on hover, which shifted that
+     box every time the mouse crossed a node. Fixed by dropping the hover
+     scale (brightness alone is enough feedback) and dropping `observe` in
+     favor of fitting once, keyed on the graph itself.
+
+### Run it locally
+
+```
+cd backend
+docker compose up -d          # real local Postgres on 127.0.0.1:5439
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/alembic upgrade head
+.venv/bin/uvicorn app.main:app --port 8123
+
+cd frontend && npm install && npm run dev -- --port 5190 --strictPort
+```
+
+### Next (Phase 2, SPEC.md §10)
+
+The drift signal: a disposable, sandboxed venv-install step (`pip install
+-r requirements.txt` from the real clone into a throwaway venv), then a
+real `lockstep check`. SPEC.md §7.2's own warning applies directly —
+running a stranger's `pip install` is a real code-execution surface, and
+this is explicitly gated behind getting the sandboxing/timeout/low-
+privilege-worker boundary right, not a corner to cut for a demo. The
+adversarial test SPEC.md §11 calls for (a lockfile engineered to try
+something hostile during install, confirming the sandbox holds) is part
+of calling Phase 2 done, not optional polish after.
