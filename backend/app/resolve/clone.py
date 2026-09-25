@@ -22,7 +22,11 @@ def clone_repo(repo_url: str, ref: str | None = None) -> tuple[Path, str]:
     caller turns that into `scan.status=failed`/`scan.error`, never a
     guessed result."""
     scratch = Path(tempfile.mkdtemp(prefix="loom-clone-"))
-    cmd = ["git", "clone", "--depth", "1", "--single-branch"]
+    # core.symlinks=false: a submitted repo is untrusted, and a committed
+    # symlink (requirements.txt -> /etc/passwd, .providence/x.json -> a
+    # server file) would otherwise make every later read follow it off the
+    # clone. With this, git writes the link target as a plain text file.
+    cmd = ["git", "-c", "core.symlinks=false", "clone", "--depth", "1", "--single-branch"]
     if ref and ref != "HEAD":
         cmd += ["--branch", ref]
     cmd += [repo_url, str(scratch)]

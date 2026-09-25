@@ -55,3 +55,21 @@ def test_dot_providence_directory_form(tmp_path):
     ))
     status, detail = check_providence(tmp_path)
     assert status == "verified"
+
+
+def test_manifest_id_escaping_the_clone_is_not_verified(tmp_path):
+    # A submitted repo is untrusted: a manifest naming "../../<server file>"
+    # with that file's real hash used to read it and report "verified".
+    import hashlib
+
+    repo = tmp_path / "repo"
+    (repo / ".providence").mkdir(parents=True)
+    outside = tmp_path / "server-secret.json"
+    outside.write_text('{"k": 1}')
+    item = {"id": "../../server-secret", "sha256": hashlib.sha256(outside.read_bytes()).hexdigest()}
+    (repo / ".providence" / "manifest.json").write_text(json.dumps(
+        {"providence_version": 1, "generated_at": "2026-01-01T00:00:00Z", "tool": "x", "items": [item]}
+    ))
+    status, detail = check_providence(repo)
+    assert status == "unverified"
+    assert "plain file name" in detail

@@ -32,3 +32,11 @@ def canonical_hash(payload) -> str:
 
 def file_hash(path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def is_safe_id(item_id) -> bool:
+    """An item id becomes `<id>.json` inside the bundle directory, so it must
+    be a plain file name: "../x" or an absolute path would read (check) or
+    write (convert) a file outside the bundle."""
+    return (isinstance(item_id, str) and item_id not in ("", ".", "..")
+            and not any(c in item_id for c in ("/", "\\", ":", "\0")))
