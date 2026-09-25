@@ -1,5 +1,5 @@
 """check_providence against real providence bundles, written with the real
-vendored check_bundle logic (app/vendor/providence) — not a hand-simulated
+check_bundle logic (receipt-evidence's providence module) — not a hand-simulated
 shape."""
 
 from __future__ import annotations
@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 
 from app.signals.providence import check_providence
-from app.vendor.providence.spec import canonical_hash
+from receipt_evidence.providence.spec import canonical_hash
 
 
 def test_no_bundle_reads_unverified(tmp_path):

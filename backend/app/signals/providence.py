@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.vendor.providence.check import check_bundle
+from receipt_evidence.providence.check import check_bundle
 
 # Bounded, not a full recursive walk of the clone — matches carabiner's own
 # manifest_dirs discipline (resolve/graph.py's MAX_PACKAGES_PER_SCAN
